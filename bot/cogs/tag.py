@@ -15,9 +15,21 @@ from ..db import SessionLocal
 from ..models import TagReport
 from zoneinfo import ZoneInfo
 
-# Replace with the channel you want tag alerts in
-GUILD_CHANNEL_ID = 1130196142257344613  # example
 
+def find_tag_channel(interaction: discord.Interaction) -> discord.TextChannel | None:
+    """
+    Finds a text channel in the guild whose name contains 'tag' (case-insensitive).
+    Returns None if no matching channel exists.
+    """
+    if not interaction.guild:
+        return None
+
+    name_match = "tag"
+    for channel in interaction.guild.text_channels:
+        if name_match in channel.name.lower():
+            return channel
+
+    return None
 
 def _ordinal(n: int) -> str:
     """
@@ -87,20 +99,25 @@ class TagAmountModal(discord.ui.Modal, title="Report Tags"):
         )
 
         # Send alert to channel
-        channel = interaction.client.get_channel(GUILD_CHANNEL_ID)
+        channel = find_tag_channel(interaction)
+
         if channel:
             tag_label = (self.tag_type or "normal").upper()
             if count == 1:
                 msg = (
-                    f"@everyone **{tag_label} TAG!!!**\n"
-                    f"Reported by **{user.mention}** at **{human_time}**."
-                )
+                    f"@everyone **TAG!!!** - - - **{human_time}**")
             else:
                 msg = (
-                    f"@everyone **{tag_label} TAG x{count}!!!**\n"
-                    f"Reported by **{user.mention}** at **{human_time}**."
+                    f"@everyone TAG x{count}!!! - - - **{human_time}**"
                 )
             await channel.send(msg)
+        else:
+            # Fallback: let the user know no tag channel was found
+            await interaction.followup.send(
+                "⚠️ No channel containing 'tag' was found in this server — unable to send the alert.",
+                ephemeral=True,
+            )
+
 
         # Log to DB (keep UTC for machine use, human string in EST)
         with SessionLocal() as session:
@@ -109,7 +126,7 @@ class TagAmountModal(discord.ui.Modal, title="Report Tags"):
                 username=f"{user.name}#{user.discriminator}",
                 tag_type=self.tag_type or "normal",
                 count=count,
-                channel_id=GUILD_CHANNEL_ID,
+                channel_id=find_tag_channel(),
                 timestamp_utc=now_utc.replace(tzinfo=None),  # if your model expects naive
                 timestamp_human=human_time,
             )
@@ -176,6 +193,7 @@ class TagCog(commands.Cog):
         await interaction.response.send_message(
             embed=embed,
             view=TagView(),
+            ephemeral=True
         )
 
 
