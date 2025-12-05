@@ -14,6 +14,16 @@ from discord import app_commands
 from .config import DISCORD_TOKEN
 from .db import engine, Base
 
+from .config import DISCORD_TOKEN
+from .db import engine, Base
+from . import models  
+
+
+def init_db():
+    # Importing models above ensures they are registered with Base
+    Base.metadata.create_all(bind=engine)
+
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bot")
@@ -33,6 +43,7 @@ class MyBot(commands.Bot):
     async def setup_hook(self):
         # Load cogs
         await self.load_extension("bot.cogs.general")
+        await self.load_extension("bot.cogs.tag")
 
         # Sync slash commands globally (can use guild-specific first for faster dev)
         try:
@@ -47,9 +58,7 @@ class MyBot(commands.Bot):
 
 
 def init_db():
-    # Create tables
     Base.metadata.create_all(bind=engine)
-
 
 def main():
     init_db()

@@ -1,10 +1,10 @@
-"""
+'''
 Name: Database Setup
 Type: Function
 User: Bot
 Last Updated: 2025-12-04
 Function: Configure SQLAlchemy engine and session factory.
-"""
+'''
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
