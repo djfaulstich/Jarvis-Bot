@@ -126,7 +126,6 @@ class TagAmountModal(discord.ui.Modal, title="Report Tags"):
                 username=f"{user.name}#{user.discriminator}",
                 tag_type=self.tag_type or "normal",
                 count=count,
-                channel_id=find_tag_channel(),
                 timestamp_utc=now_utc.replace(tzinfo=None),  # if your model expects naive
                 timestamp_human=human_time,
             )

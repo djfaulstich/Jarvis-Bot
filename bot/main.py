@@ -44,6 +44,7 @@ class MyBot(commands.Bot):
         # Load cogs
         await self.load_extension("bot.cogs.general")
         await self.load_extension("bot.cogs.tag")
+        await self.load_extension("bot.cogs.videos")
 
         # Sync slash commands globally (can use guild-specific first for faster dev)
         try:
