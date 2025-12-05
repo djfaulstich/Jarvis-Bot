@@ -13,8 +13,6 @@ from discord import app_commands
 PLAYLIST_URL = "https://www.youtube.com/playlist?list=PLG-Yl_vCaRsjWWtxtdGi2rsk3NnmsVacL"
 
 
-
-
 class VideosCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -26,19 +24,18 @@ class VideosCog(commands.Cog):
     async def videos_command(self, interaction: discord.Interaction):
         embed = discord.Embed(
             title="TAG Playlist",
-            url=PLAYLIST_URL,  # clicking the title opens the playlist
+            url=PLAYLIST_URL,  
             description="",
             color=discord.Color.red(),
         )
 
-        # Fake the little YouTube look a bit
         embed.set_author(
             name="YouTube",
         )
 
         await interaction.response.send_message(
             embed=embed,
-            ephemeral=False,  # set True if you want only the caller to see it
+            ephemeral=False,  
         )
 
 
