@@ -15,11 +15,13 @@ from discord.ext import commands
 from discord import app_commands
 
 from PIL import Image, ImageDraw
-from sqlalchemy import select
 
 from ..db import SessionLocal
 from ..models import Player, ResourceType, PlayerResource
 from pathlib import Path
+from ..utils.amounts import parse_amount_with_suffix, format_amount_with_suffix
+from ..utils.players import get_or_create_player, get_resource_amount, adjust_resource
+
 
 # ---------- Game config ----------
 
@@ -64,123 +66,12 @@ SYMBOL_ICON_FILES = {
 }
 
 
-# ---------- Money helpers (same style as players/blackjack) ----------
-
-def parse_amount_with_suffix(raw: str) -> int:
-    s = raw.replace(",", "").strip().upper()
-    if not s:
-        raise ValueError("Empty amount")
-
-    multiplier = 1
-    if s[-1] in ("K", "M", "B", "T"):
-        suffix = s[-1]
-        num_part = s[:-1]
-        if suffix == "K":
-            multiplier = 1_000
-        elif suffix == "M":
-            multiplier = 1_000_000
-        elif suffix == "B":
-            multiplier = 1_000_000_000
-        elif suffix == "T":
-            multiplier = 1_000_000_000_000
-    else:
-        num_part = s
-
-    value = float(num_part)
-    result = int(round(value * multiplier))
-    return result
-
-
-def format_amount_with_suffix(value: int) -> str:
-    n = value
-    abs_n = abs(n)
-
-    def fmt(x, suffix):
-        if x.is_integer():
-            return f"{int(x)}{suffix}"
-        return f"{x:.2f}{suffix}".rstrip("0").rstrip(".")
-
-    if abs_n >= 1_000_000_000_000:
-        return fmt(n / 1_000_000_000_000, "T")
-    elif abs_n >= 1_000_000_000:
-        return fmt(n / 1_000_000_000, "B")
-    elif abs_n >= 1_000_000:
-        return fmt(n / 1_000_000, "M")
-    elif abs_n >= 1_000:
-        return fmt(n / 1_000, "K")
-    else:
-        return f"{n:,}"
-
-
 DEFAULT_RESOURCES = [
     ("money", "Money"),
     ("tech_points", "Tech Points"),
 ]
 
 
-def ensure_default_resources(session):
-    existing = {r.key: r for r in session.scalars(select(ResourceType)).all()}
-    for key, display_name in DEFAULT_RESOURCES:
-        if key not in existing:
-            rt = ResourceType(key=key, display_name=display_name, is_active=True)
-            session.add(rt)
-    session.commit()
-
-
-def get_or_create_player(session, user: discord.abc.User) -> Player:
-    player = session.scalar(select(Player).where(Player.discord_id == user.id))
-    if player:
-        player.name = user.display_name
-        session.commit()
-        return player
-
-    player = Player(discord_id=user.id, name=user.display_name)
-    session.add(player)
-    session.commit()
-    return player
-
-
-def get_money_balance(session, player: Player) -> int:
-    ensure_default_resources(session)
-    money_type = session.scalar(
-        select(ResourceType).where(ResourceType.key == "money")
-    )
-    if not money_type:
-        return 0
-
-    pr = session.scalar(
-        select(PlayerResource).where(
-            PlayerResource.player_id == player.id,
-            PlayerResource.resource_id == money_type.id,
-        )
-    )
-    return pr.amount if pr else 0
-
-
-def change_money_balance(session, player: Player, delta: int) -> int:
-    ensure_default_resources(session)
-    money_type = session.scalar(
-        select(ResourceType).where(ResourceType.key == "money")
-    )
-    if not money_type:
-        raise RuntimeError("Money resource type not defined.")
-
-    pr = session.scalar(
-        select(PlayerResource).where(
-            PlayerResource.player_id == player.id,
-            PlayerResource.resource_id == money_type.id,
-        )
-    )
-    if not pr:
-        pr = PlayerResource(
-            player_id=player.id, resource_id=money_type.id, amount=0
-        )
-        session.add(pr)
-
-    pr.amount += delta
-    session.commit()
-    session.refresh(pr)
-    return pr.amount
 
 
 # Cache loaded icon images (PIL.Image) by symbol
@@ -379,7 +270,7 @@ class SlotsCog(commands.Cog):
         # Check & deduct balance
         with SessionLocal() as session:
             player = get_or_create_player(session, user)
-            balance = get_money_balance(session, player)
+            balance = balance = get_resource_amount(session, player, "money")
             if bet_int > balance:
                 await interaction.response.send_message(
                     f"You don’t have enough Money for that bet.\n"
@@ -389,7 +280,8 @@ class SlotsCog(commands.Cog):
                 return
 
             # Deduct bet
-            change_money_balance(session, player, -bet_int)
+            adjust_resource(session, player, "money", -bet_int)
+
 
         # Spin 3 reels
         spin = [random.choice(SYMBOLS) for _ in range(3)]
@@ -427,8 +319,8 @@ class SlotsCog(commands.Cog):
         with SessionLocal() as session:
             player = get_or_create_player(session, user)
             if winnings > 0:
-                change_money_balance(session, player, winnings)
-            final_balance = get_money_balance(session, player)
+                adjust_resource(session, player, "money", winnings)
+            final_balance = get_resource_amount(session, player, "money")
 
         # Append balance info
         result_text += f"\nBalance: **${format_amount_with_suffix(final_balance)}**"

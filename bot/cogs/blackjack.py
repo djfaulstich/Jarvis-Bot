@@ -21,6 +21,10 @@ from sqlalchemy import select
 
 from ..db import SessionLocal
 from ..models import Player, ResourceType, PlayerResource
+from ..utils.amounts import parse_amount_with_suffix, format_amount_with_suffix
+from ..utils.players import get_or_create_player, get_resource_amount, adjust_resource
+
+
 
 import requests
 
@@ -36,127 +40,12 @@ SUIT_MAP = {"♠": "S", "♥": "H", "♦": "D", "♣": "C"}
 
 # ---------- Money helpers (reuse same idea as players cog) ----------
 
-def parse_amount_with_suffix(raw: str) -> int:
-    """
-    Parse strings like '1000', '1k', '2.5M', '10m', '3B', '1.2T' into an integer.
-    """
-    s = raw.replace(",", "").strip().upper()
-    if not s:
-        raise ValueError("Empty amount")
-
-    multiplier = 1
-    if s[-1] in ("K", "M", "B", "T"):
-        suffix = s[-1]
-        num_part = s[:-1]
-        if suffix == "K":
-            multiplier = 1_000
-        elif suffix == "M":
-            multiplier = 1_000_000
-        elif suffix == "B":
-            multiplier = 1_000_000_000
-        elif suffix == "T":
-            multiplier = 1_000_000_000_000
-    else:
-        num_part = s
-
-    value = float(num_part)
-    result = int(round(value * multiplier))
-    return result
-
-
-def format_amount_with_suffix(value: int) -> str:
-    """
-    Format large integers as 10K, 2.5M, 3B, etc., smaller numbers with commas.
-    """
-    n = value
-    abs_n = abs(n)
-
-    def fmt(x, suffix):
-        if x.is_integer():
-            return f"{int(x)}{suffix}"
-        return f"{x:.2f}{suffix}".rstrip("0").rstrip(".")
-
-    if abs_n >= 1_000_000_000_000:
-        return fmt(n / 1_000_000_000_000, "T")
-    elif abs_n >= 1_000_000_000:
-        return fmt(n / 1_000_000_000, "B")
-    elif abs_n >= 1_000_000:
-        return fmt(n / 1_000_000, "M")
-    elif abs_n >= 1_000:
-        return fmt(n / 1_000, "K")
-    else:
-        return f"{n:,}"
-
-
 DEFAULT_RESOURCES = [
     ("money", "Money"),
     ("tech_points", "Tech Points"),
 ]
 
 
-def ensure_default_resources(session):
-    existing = {r.key: r for r in session.scalars(select(ResourceType)).all()}
-    for key, display in DEFAULT_RESOURCES:
-        if key not in existing:
-            rt = ResourceType(key=key, display_name=display, is_active=True)
-            session.add(rt)
-    session.commit()
-
-
-def get_or_create_player(session, user: discord.abc.User) -> Player:
-    player = session.scalar(select(Player).where(Player.discord_id == user.id))
-    if player:
-        player.name = user.display_name
-        session.commit()
-        return player
-
-    player = Player(discord_id=user.id, name=user.display_name)
-    session.add(player)
-    session.commit()
-    return player
-
-
-def get_money_balance(session, player: Player) -> int:
-    ensure_default_resources(session)
-    money_type = session.scalar(
-        select(ResourceType).where(ResourceType.key == "money")
-    )
-    if not money_type:
-        return 0
-
-    pr = session.scalar(
-        select(PlayerResource).where(
-            PlayerResource.player_id == player.id,
-            PlayerResource.resource_id == money_type.id,
-        )
-    )
-    return pr.amount if pr else 0
-
-
-def change_money_balance(session, player: Player, delta: int) -> int:
-    ensure_default_resources(session)
-    money_type = session.scalar(
-        select(ResourceType).where(ResourceType.key == "money")
-    )
-    if not money_type:
-        raise RuntimeError("Money resource type not defined.")
-
-    pr = session.scalar(
-        select(PlayerResource).where(
-            PlayerResource.player_id == player.id,
-            PlayerResource.resource_id == money_type.id,
-        )
-    )
-    if not pr:
-        pr = PlayerResource(
-            player_id=player.id, resource_id=money_type.id, amount=0
-        )
-        session.add(pr)
-
-    pr.amount += delta
-    session.commit()
-    session.refresh(pr)
-    return pr.amount
 
 
 # ---------- Blackjack core logic ----------
@@ -479,13 +368,13 @@ class BlackjackView(discord.ui.View):
             # Check balance
             with SessionLocal() as session:
                 player = get_or_create_player(session, interaction.user)
-                bal = get_money_balance(session, player)
+                bal = get_resource_amount(session, player, "money")
                 if base_bet > bal:
                     await interaction.followup.send(
                         "Not enough balance to double down.", ephemeral=True
                     )
                     return
-                change_money_balance(session, player, -base_bet)
+                adjust_resource(session, player, "money", -base_bet)
 
             game["bets"][idx] *= 2
             hand.append(draw_card())
@@ -560,13 +449,13 @@ class BlackjackView(discord.ui.View):
             # Check balance
             with SessionLocal() as session:
                 player = get_or_create_player(session, interaction.user)
-                bal = get_money_balance(session, player)
+                bal = get_resource_amount(session, player, "money")
                 if base_bet > bal:
                     await interaction.followup.send(
                         "Not enough balance to split.", ephemeral=True
                     )
                     return
-                change_money_balance(session, player, -base_bet)
+                adjust_resource(session, player, "money", -base_bet)
 
             hand1 = [hand[0], draw_card()]
             hand2 = [hand[1], draw_card()]
@@ -627,13 +516,13 @@ class BlackjackCog(commands.Cog):
 
                 if dealer_val > 21 or player_val > dealer_val:
                     # player wins: pay 2x bet (return + winnings)
-                    change_money_balance(session, player, bet * 2)
+                    adjust_resource(session, player, "money", bet * 2)
                     results.append(
                         f"{format_hand(hand)} beats dealer ({dealer_val}) → +${bet}"
                     )
                 elif dealer_val == player_val:
                     # push: refund bet
-                    change_money_balance(session, player, bet)
+                    adjust_resource(session, player, "money", bet)
                     results.append(
                         f"{format_hand(hand)} pushes with dealer ({dealer_val}) → $0"
                     )
@@ -642,7 +531,7 @@ class BlackjackCog(commands.Cog):
                         f"{format_hand(hand)} loses to dealer ({dealer_val}) → -${bet}"
                     )
 
-            final_balance = get_money_balance(session, player)
+            final_balance = get_resource_amount(session, player, "money")
 
         final_text = (
             f"Dealer's hand: {format_hand(dealer)}\n"
@@ -701,7 +590,7 @@ class BlackjackCog(commands.Cog):
         # Check and deduct balance
         with SessionLocal() as session:
             player = get_or_create_player(session, user)
-            balance = get_money_balance(session, player)
+            balance = get_resource_amount(session, player, "money")
             if bet_int > balance:
                 await interaction.response.send_message(
                     f"You don't have enough Money for that bet. "
@@ -711,7 +600,7 @@ class BlackjackCog(commands.Cog):
                 return
 
             # Deduct bet up front
-            change_money_balance(session, player, -bet_int)
+            adjust_resource(session, player, "money", -bet_int)
 
         # Initialize game state
         player_hand = [draw_card(), draw_card()]
@@ -736,8 +625,8 @@ class BlackjackCog(commands.Cog):
                 player = get_or_create_player(session, user)
                 if dealer_val == 21:
                     # push: refund bet
-                    change_money_balance(session, player, bet_int)
-                    balance = get_money_balance(session, player)
+                    adjust_resource(session, player, "money", bet_int)
+                    balance = get_resource_amount(session, player, "money")
                     msg = (
                         f"Your hand: {format_hand(player_hand)}\n"
                         f"Dealer: {format_hand(dealer_hand)}\n"
@@ -748,8 +637,8 @@ class BlackjackCog(commands.Cog):
                 else:
                     # player wins 3:2 (we already deducted bet)
                     payout = int(bet_int * 2.5)
-                    change_money_balance(session, player, payout)
-                    balance = get_money_balance(session, player)
+                    adjust_resource(session, player, "money", payout)
+                    balance = get_resource_amount(session, player, "money")
                     winnings = payout - bet_int
                     msg = (
                         f"Your hand: {format_hand(player_hand)}\n"
