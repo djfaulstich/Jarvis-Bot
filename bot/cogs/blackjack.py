@@ -29,7 +29,7 @@ import requests
 BOT_DIR = Path(__file__).resolve().parents[1]
 
 # Your PNG-cards-1.3 folder is directly inside /bot
-CARD_ASSET_PATH = BOT_DIR / "PNG-cards-1.3"
+CARD_ASSET_PATH = BOT_DIR / "assets" / "PNG-cards-1.3"
 
 SUIT_MAP = {"♠": "S", "♥": "H", "♦": "D", "♣": "C"}
 
