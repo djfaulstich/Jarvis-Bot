@@ -18,33 +18,12 @@ from ..db import SessionLocal
 from ..models import ResourceType, Player  # Player used for balances queries
 from ..utils.amounts import parse_amount_with_suffix, format_amount_with_suffix
 from ..utils.players import get_or_create_player, adjust_resource, get_resource_amount
+from bot.utils.resource_autocomplete import resource_key_autocomplete
 
 
 class PlayersCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-
-    async def _resource_autocomplete(
-        self, interaction: discord.Interaction, current: str
-    ) -> list[app_commands.Choice[str]]:
-        """
-        Autocomplete resource keys from DB ResourceType.
-        """
-        current_l = (current or "").lower()
-
-        with SessionLocal() as session:
-            resources = session.scalars(
-                select(ResourceType).where(ResourceType.is_active == True)  # noqa: E712
-            ).all()
-
-        choices: list[app_commands.Choice[str]] = []
-        for r in resources:
-            label = f"{r.display_name} ({r.key})"
-            if current_l in r.key.lower() or current_l in (r.display_name or "").lower():
-                choices.append(app_commands.Choice(name=label[:100], value=r.key))
-
-        # Discord max is 25 choices
-        return choices[:25]
 
     def _format_resource_value(self, resource_key: str, amount: int) -> str:
         """
@@ -110,7 +89,7 @@ class PlayersCog(commands.Cog):
         resource="Resource key (autocomplete)",
         amount="Amount to add (Money supports 10K/5M/etc; others use integers)",
     )
-    @app_commands.autocomplete(resource=_resource_autocomplete)
+    @app_commands.autocomplete(resource=resource_key_autocomplete)
     @app_commands.checks.has_permissions(manage_guild=True)
     async def give_resource(
         self,
@@ -170,7 +149,7 @@ class PlayersCog(commands.Cog):
         resource="Resource key (autocomplete)",
         amount="Exact value (Money supports 10K/5M/etc; others use integers)",
     )
-    @app_commands.autocomplete(resource=_resource_autocomplete)
+    @app_commands.autocomplete(resource=resource_key_autocomplete)
     @app_commands.checks.has_permissions(manage_guild=True)
     async def set_resource(
         self,
@@ -226,7 +205,7 @@ class PlayersCog(commands.Cog):
         resource="Resource key (autocomplete)",
         limit="How many to show (default 10, max 25)",
     )
-    @app_commands.autocomplete(resource=_resource_autocomplete)
+    @app_commands.autocomplete(resource=resource_key_autocomplete)
     async def leaderboard(
         self,
         interaction: discord.Interaction,
