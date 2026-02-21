@@ -19,6 +19,7 @@ from ..models import ResourceType, Player  # Player used for balances queries
 from ..utils.amounts import parse_amount_with_suffix, format_amount_with_suffix
 from ..utils.players import get_or_create_player, adjust_resource, get_resource_amount
 from bot.utils.resource_autocomplete import resource_key_autocomplete
+from ..utils.resources import list_active_resource_types
 
 
 class PlayersCog(commands.Cog):
@@ -62,15 +63,27 @@ class PlayersCog(commands.Cog):
 
         with SessionLocal() as session:
             player = get_or_create_player(session, target)
-            money = get_resource_amount(session, player, "money")
-            tech = get_resource_amount(session, player, "tech_points")
+            resource_types = list_active_resource_types(session)
+
+            balances = [
+                (resource_type, get_resource_amount(session, player, resource_type.key))
+                for resource_type in resource_types
+            ]
 
         embed = discord.Embed(
             title=f"{target.display_name}'s Resources",
             color=discord.Color.gold(),
         )
-        embed.add_field(name="Money", value=f"${format_amount_with_suffix(money)}", inline=False)
-        embed.add_field(name="Tech Points", value=f"{tech:,}", inline=False)
+
+        if not balances:
+            embed.description = "No active resource categories found. Use /add_resource_type to create one."
+        else:
+            for resource_type, amount in balances:
+                embed.add_field(
+                    name=resource_type.display_name,
+                    value=self._format_resource_value(resource_type.key, amount),
+                    inline=False,
+                )
 
         await interaction.response.send_message(embed=embed)
 #---------------------------------------------------------------------------------------------------------------------------------------------------------------
