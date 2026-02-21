@@ -10,7 +10,6 @@ import discord
 from sqlalchemy import select
 
 from ..models import Player, ResourceType, PlayerResource
-from .resources import ensure_default_resources
 
 def get_or_create_player(session, user: discord.abc.User) -> Player:
     player = session.scalar(select(Player).where(Player.discord_id == user.id))
@@ -26,7 +25,6 @@ def get_or_create_player(session, user: discord.abc.User) -> Player:
 
 
 def get_resource_amount(session, player: Player, resource_key: str) -> int:
-    ensure_default_resources(session)
     rtype = session.scalar(select(ResourceType).where(ResourceType.key == resource_key))
     if not rtype:
         return 0
@@ -41,7 +39,6 @@ def get_resource_amount(session, player: Player, resource_key: str) -> int:
 
 
 def adjust_resource(session, player: Player, resource_key: str, delta: int) -> int:
-    ensure_default_resources(session)
     rtype = session.scalar(select(ResourceType).where(ResourceType.key == resource_key))
     if not rtype:
         raise RuntimeError(f"Resource type '{resource_key}' is not defined.")
